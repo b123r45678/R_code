@@ -1,0 +1,64 @@
+library(stringr)
+library(openxlsx)
+library("survival")
+library("survminer")
+library(rms)
+library(Hmisc)
+
+file_path <- ''
+survival_file <- "survival.xlsx"
+setwd(file_path)
+mydat <- read.xlsx(survival_file,colNames = T, sheet = 1)
+
+covariates <- colnames(mydat)[n:ncol(mydat)]
+mult_formula_f <- sapply(covariates,function(x)as.formula(paste(f, x)))
+mult_model_f <- lapply(mult_formula_f, function(x){coxph(x, data=mydat)})
+mult_result_f <- lapply(mult_model_f,
+                        function(x){ 
+                          x <- summary(x)
+                          co <- signif(x$coefficients[, "coef"][1], digits = 5)
+                          hr <- signif(x$coefficients[, "exp(coef)"][1], digits = 3)
+                          p.waldz <- signif(x$coefficients[, "Pr(>|z|)"], digits = 3)
+                          p.logrank <- signif(x$sctest["pvalue"], digits = 3)
+                          HR.CI.lower <- signif(x$conf.int[,"lower .95"][1], digits =3)
+                          HR.CI.upper <- signif(x$conf.int[,"upper .95"][1], digits =3)
+                          HR <- paste0(hr,"(",HR.CI.lower, "~", HR.CI.upper, ")")
+                          res<-c(co, HR, hr,  HR.CI.lower, HR.CI.upper, p.waldz, p.logrank)
+                          names(res)<-c("Beta", "HR(95% CI)", "HR", "lower95","upper95", "Z_pval","Logrank_pval")
+                          return(res)
+                        })
+results_f <- t(as.data.frame(mult_result_f, check.names = FALSE))
+coxout_f <- as.data.frame(results_f)
+coxout_f$gene = rownames(coxout_f)
+write.table(coxout_f, file=outfile, row.names = F, col.names = T, sep = ',', quote = F)
+
+
+############ fit KM curve ############
+fit<- survfit(Surv(mydat$DFS,mydat$DFS_status) ~mydat$combined, data=mydat)
+
+ggsurvplot(fit, data = mydat)
+
+survp1 <- ggsurvplot(fit,data = mydat,
+                     xlab = "Time (months)", ylab = "Disease−free Survival",
+                    font.tickslab = c(12, "bold", "black"), font.title= c(12, "bold", "black"), 
+                    font.x= c(14, "bold", "black"), font.y= c(14, "bold", "black"), 
+                     pval = TRUE, pval.size = 4.5, pval.coord=c(0.8,0.15),pval.method=TRUE,pval.method.coord=c(0.2,0.25),#add p-value
+                     #conf.int = TRUE,#confidence interval
+                     risk.table = TRUE, risk.table.y.text.col=TRUE, 
+                     tables.height = 0.2, censor.size = 3, fontsize = 4, 
+                     table.axes.offset=FALSE,
+                     tables.theme = theme_cleantable(),
+                     #ggtheme = theme_bw(), # Change ggplot2 theme
+                     surv.median.line = "hv", # Add medians survival
+                     xlim = c(0,200), ylim = c(0, 1), #axis limit
+                     legend = c(0.9,0.9), 
+                     legend.title = "CIN",# Change legends: title& labels
+                   #  legend.labs = c("Low","High"),
+                   # font.legend=c(13,"plain","black"),
+                     break.x.by =20, #x-axis interval
+                     break.y.by = 0.2,
+                     ##palette = "lancet",
+                     palette = c("#4682B4","#B22222","#E7B800","#094583")##"#D70907","#094583"
+                     
+)
+survp1

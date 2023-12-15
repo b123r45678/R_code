@@ -1,0 +1,228 @@
+rm(list=ls())
+file_path <- 'F:/'
+patient_file <- 'oncoprint.xlsx'
+own_gene <- 1
+gene_list_file <- 'genelist.xlsx'
+
+common<-0
+all_gene <-1
+num_gene <- 50
+auto_cluster <- 1
+show_name <- 1
+row_order <- 0
+
+my_height <- 12
+my_width <- 20
+my_font <- 14
+top_bar <- 20
+right_bar <- 22
+right_legend <- 6
+bottom_bar <-10
+
+library(RColorBrewer)
+library(stringr)
+library(ComplexHeatmap)
+library(openxlsx)
+
+setwd(file_path)
+df<-unique(read.xlsx(patient_file,colNames = T, sheet = 1))
+
+colnames(df)<-c("X1","X2","X3")
+df$X1<-str_trim(df$X1)
+df$X2<-str_trim(toupper(df$X2))
+df$X3 <- str_trim(toupper(df$X3))
+
+
+df <- as.data.frame(apply(df, 2, gsub, pattern = ' ', replacement = '_'))
+if(common==1){
+  df$X3 <- str_trim(toupper(df$X3))
+  mutant<-sort(unique(df$X3))
+  my_mu<-mutant
+}else if(common==0){
+  
+  
+  my_mu <- toupper(c('frameshift_variant','missense_variant','nonsense_variant','others','splice_variant','fusion','amplification','inframe_variant','loss',"male","female"))
+}
+
+my_mu_nosize <- toupper(c("male","female"))
+
+
+####caculate gene frequency###########
+alldata<-df[,1:3]
+data<-unique(alldata[,1:2])
+samplenum<-length(unique(alldata[,1]))
+genenumber<-sort(table(factor(data[,2])),decreasing=TRUE)
+GeneNum<-data.frame(as.matrix(row.names(genenumber)),genenumber)
+frequenc<-as.matrix(genenumber/samplenum)
+frequencs<-data.frame(as.matrix(row.names(frequenc)),frequenc[,1])
+
+if(own_gene == 1){
+  gene_chr <- as.matrix(read.xlsx(gene_list_file,colNames = F, sheet = 1))
+}else{
+  gene_chr <- names(sort(table(df$X2), decreasing = T))
+}
+
+if(own_gene==0){
+  gene_chr<-unlist(frequencs[,1])
+}else if(own_gene==1){
+  gene_chr<-unlist(str_trim(toupper(gene_chr)))
+}
+
+
+###########set mutant colors######################
+my_col <- c(brewer.pal(8, 'Set1'), brewer.pal(12, 'Paired'),'navajowhite3', 'midnightblue', 'khaki1', 'seagreen4', 'turquoise2', 'deeppink',
+            'lightpink', 'khaki1', 'seagreen4', 'turquoise2','midnightblue', 'firebrick1', 'darkorange',
+            'yellowgreen', 'lightslateblue')
+
+get_index <- function(each_mutation_chr, my_col, my_mu){
+  print(each_mutation_chr)
+  index <- which(each_mutation_chr == my_mu)
+  print(index)
+  return(my_col[index])
+}
+
+update_list <- function(x) {
+  if(x[['X2']] %in% gene_chr & x[['X2']] != ''){
+    final_list[[x[['X3']]]][x[['X2']], x[['X1']]] <<- 1
+  }
+}
+
+if(show_name == 1){
+  my_show_name = 'T'
+}else{
+  my_show_name = 'F'
+}
+
+
+if(common==1){
+  mutation_chr <- names(sort(table(df$X3), decreasing = T))
+  mutation_chr <- sort(mutation_chr[mutation_chr != ''])
+}else if(common==0){
+  aa<-intersect(sort(my_mu),sort(unique(df$X3)))
+  bb<-as.character(sort(unique(df$X3)))
+  if(identical(aa,bb)){
+    mutation_chr <-my_mu
+    mutation_chr <- mutation_chr[mutation_chr != '']
+  }else{
+    mutation_chr <- names(sort(table(df$X3), decreasing = T))
+    mutation_chr <- sort(mutation_chr[mutation_chr != ''])
+  }
+}
+
+mutation_len <- length(mutation_chr)
+
+gene_chr <- gene_chr[gene_chr != '']
+gene_len <- length(gene_chr)
+
+if(all_gene ==  0 & gene_len > num_gene){
+  gene_len <- num_gene
+  gene_chr <- gene_chr[1:num_gene]
+}
+
+patient_chr <- unique(df$X1)
+patient_len <- length(patient_chr)
+pre_matrix <- matrix(0, nrow = gene_len, ncol = patient_len,
+                     dimnames = list(gene_chr, patient_chr))
+final_list <- vector(mode = 'list', length = mutation_len)
+names(final_list) <- mutation_chr
+final_list <<- lapply(final_list, function(x) pre_matrix)
+df$X1 <- as.character(df$X1)
+if(mutation_len > 14){
+  other_col <- sample(colours(), mutation_len - 14, replace = F)
+  my_col <- c(my_col, other_col)
+}
+
+col <- sapply(mutation_chr, get_index, my_col, my_mu)
+
+legend_order <- names(col)
+ratio <- 1 / mutation_len
+nnn <<- mutation_len
+backgr_mutation <- c('background', mutation_chr)
+
+generate_alter_fun <- function(x, col){
+  if(x == 'background'){
+    eval(parse(text = "function(x, y, w, h) {
+               grid.rect(x, y, w-unit(0.5, 'mm'), h-unit(0.5, 'mm'),
+               gp = gpar(fill = '#CCCCCC', col = 'NA'))}"))
+  }else if(x %in% my_mu_nosize){
+    fun_command <- paste0("function(x, y, w, h) {
+                        grid.rect(x, y, w-unit(0.5, 'mm'), h*", mutation_len, "*", ratio, "-unit(0.5, 'mm'),
+                        gp = gpar(fill = '", col[x], "', col = 'NA'))}")
+    eval(parse(text = fun_command))
+  }else{
+    fun_command <- paste0("function(x, y, w, h) {
+                        grid.rect(x, y, w-unit(0.5, 'mm'), h*", nnn, "*", ratio, "-unit(0.5, 'mm'),
+                        gp = gpar(fill = '", col[x], "', col = 'NA'))}")
+    nnn <<- nnn - 1
+    eval(parse(text = fun_command))
+  }
+}
+
+junk <- apply(df, 1, update_list)
+alter_fun_str <- lapply(backgr_mutation, generate_alter_fun, col)
+names(alter_fun_str) <- backgr_mutation
+
+filename<-strsplit(basename(patient_file),split="[.]")[[1]][1]
+
+if(all_gene ==0){
+  out_name <- paste0(paste0(filename,".top",num_gene), '.pdf')
+}else if(all_gene ==1){
+  out_name <- paste0(paste0(filename,".all"), '.pdf')
+}
+
+####deal with mutatoin frequency among genes and mutation types###########
+if(own_gene==0){
+  colnames(frequencs)<-c("GeneName","Frequency")
+  write.xlsx(frequencs,paste0(filename,".all.frequency.xlsx"))
+}else if(own_gene==1){
+  colnames(frequencs)<-c("GeneName","Frequency")
+  gene_subset<-frequencs[match(gene_chr,frequencs[,1],0L),]
+  frequency<-gene_subset[order(gene_subset[,2],decreasing = T),]
+  write.xlsx(frequencs,paste0(filename,".all.frequency.xlsx"))
+  write.xlsx(frequency,paste0(filename,".genelist.frequency.xlsx"))
+  out_name<-paste0(paste0(filename,".genelist"), '.pdf')
+}
+pdf(file = out_name, height = my_height, width = my_width)
+
+basic_function_string = "oncoPrint(final_list,
+alter_fun = alter_fun_str,
+col = col,
+pct_gp = gpar(fontsize = my_font),
+top_annotation_height = unit(top_bar,'mm'),
+row_names_gp = gpar(fontsize = my_font),
+row_barplot_width = unit(right_bar, 'mm'),
+show_column_names = as.logical(my_show_name),
+pct_digits = 1,
+heatmap_legend_param = list(title = 'Alterations',
+title_gp = gpar(fontsize = my_font),
+labels_gp = gpar(fontsize = my_font),
+labels = legend_order,
+grid_height = unit(right_legend, 'mm'),
+grid_width = unit(right_legend, 'mm')),
+"
+
+last_function_string = "axis_gp = gpar(fontsize = my_font))"
+
+if(row_order == 1){
+  to_be_add <- "row_order = NULL,"
+  basic_function_string <- paste0(basic_function_string, to_be_add)
+}
+
+if(auto_cluster == 0){
+  to_be_add <- "column_order = NULL,"
+  basic_function_string <- paste0(basic_function_string, to_be_add)
+}
+
+
+whole_function_string <- paste0(basic_function_string, last_function_string)
+
+print(whole_function_string)
+eval(parse(text = whole_function_string))
+dev.off()
+
+
+print(paste0("numbers of gene:",gene_len, "; numbers of samples: ",patient_len))
+print(paste0("Height of figure:", my_height,"; width of figure: ", my_width))
+print(out_name)
+
+
